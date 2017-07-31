@@ -96,7 +96,13 @@ class FileProcessor
                     $type = $method->returnType;
 
                     if (!is_null($type)) {
-                        $type = (string)$type;
+                        if($type instanceof \PhpParser\Node\NullableType)
+                        {
+                            $type = (string)$type->getType();
+                        }
+                        else{
+                            $type = (string)$type;
+                        }
                     }
 
                     if (isset($uses[$type])) {
@@ -120,7 +126,13 @@ class FileProcessor
                         $type = $param->type;
 
                         if (!is_null($type)) {
-                            $type = (string)$type;
+                            if($type instanceof \PhpParser\Node\NullableType)
+                            {
+                                $type = (string)$type->getType();
+                            }
+                            else{
+                                $type = (string)$type;
+                            }
                         }
 
                         if (isset($uses[$type])) {
