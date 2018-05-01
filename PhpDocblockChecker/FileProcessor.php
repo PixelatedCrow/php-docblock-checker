@@ -2,8 +2,8 @@
 
 namespace PhpDocblockChecker;
 
-use PhpDocblockChecker\DocBlockParser;
 use PhpParser\Comment\Doc;
+use PhpParser\Node\NullableType;
 use PhpParser\Node\Stmt;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
@@ -33,7 +33,8 @@ class FileProcessor
             $parser = (new ParserFactory())->create(ParserFactory::PREFER_PHP7);
             $stmts = $parser->parse(file_get_contents($file));
             $this->processStatements($stmts);
-        } catch (\Exception $ex) {}
+        } catch (\Exception $ex) {
+        }
     }
 
     /**
@@ -80,9 +81,9 @@ class FileProcessor
                 $fullClassName = $prefix . '\\' . (string)$class->name;
 
                 $this->classes[$fullClassName] = [
-                    'file' => $this->file,
-                    'line' => $class->getAttribute('startLine'),
-                    'name' => $fullClassName,
+                    'file'     => $this->file,
+                    'line'     => $class->getAttribute('startLine'),
+                    'name'     => $fullClassName,
                     'docblock' => $this->getDocblock($class, $uses),
                 ];
 
@@ -95,14 +96,12 @@ class FileProcessor
 
                     $type = $method->returnType;
 
-                    if (!is_null($type)) {
-                        if($type instanceof \PhpParser\Node\NullableType)
-                        {
-                            $type = (string)$type->getType();
-                        }
-                        else{
+                    if (!$method->returnType instanceof NullableType) {
+                        if (!is_null($type)) {
                             $type = (string)$type;
                         }
+                    } else {
+                        $type = (string)$type->type;
                     }
 
                     if (isset($uses[$type])) {
@@ -111,37 +110,48 @@ class FileProcessor
 
                     $type = substr($type, 0, 1) == '\\' ? substr($type, 1) : $type;
 
+                    if ($method->returnType instanceof NullableType) {
+                        $type = ['null', $type];
+                        sort($type);
+                    }
+                    if ($method->returnType == 'self' || $method->returnType == 'static') {
+                        $type = $class->name;
+                    }
 
                     $thisMethod = [
-                        'file' => $this->file,
-                        'class' => $fullClassName,
-                        'name' => $fullMethodName,
-                        'line' => $method->getAttribute('startLine'),
-                        'return' => $type,
-                        'params' => [],
-                        'docblock' => $this->getDocblock($method, $uses),
+                        'file'        => $this->file,
+                        'class'       => $fullClassName,
+                        'class_short' => $class->name,
+                        'name'        => $fullMethodName,
+                        'line'        => $method->getAttribute('startLine'),
+                        'return'      => $type,
+                        'params'      => [],
+                        'docblock'    => $this->getDocblock($method, $uses),
                     ];
 
                     foreach ($method->params as $param) {
                         $type = $param->type;
 
-                        if (!is_null($type)) {
-                            if($type instanceof \PhpParser\Node\NullableType)
-                            {
-                                $type = (string)$type->getType();
-                            }
-                            else{
+                        if (!$param->type instanceof NullableType) {
+                            if (!is_null($type)) {
                                 $type = (string)$type;
                             }
+                        } else {
+                            $type = (string)$type->type;
                         }
 
                         if (isset($uses[$type])) {
                             $type = $uses[$type];
                         }
-
                         $type = substr($type, 0, 1) == '\\' ? substr($type, 1) : $type;
 
-                        $thisMethod['params']['$'.$param->name] = $type;
+                        $type = $type . ($param->variadic ? '[]' : '');
+
+                        if ($param->type instanceof NullableType) {
+                            $type = ['null', $type];
+                            sort($type);
+                        }
+                        $thisMethod['params'][($param->variadic ? '...' : '') . '$' . $param->name] = $type;
                     }
 
                     $this->methods[$fullMethodName] = $thisMethod;
@@ -191,13 +201,16 @@ class FileProcessor
                     $type = (string)$type;
                 }
 
-                if (isset($uses[$type])) {
-                    $type = $uses[$type];
+                $types = [];
+                foreach (explode('|', $type) as $tmpType) {
+                    if (isset($uses[rtrim($tmpType,'[]')])) {
+                        $tmpType = $uses[rtrim($tmpType,'[]')] . (substr($tmpType,-1) === ']' ?'[]':'');
+                    }
+
+                    $types[] = substr($tmpType, 0, 1) == '\\' ? substr($tmpType, 1) : $tmpType;
                 }
 
-                $type = substr($type, 0, 1) == '\\' ? substr($type, 1) : $type;
-
-                $rtn['params'][$param['var']] = $type;
+                $rtn['params'][$param['var']] = implode('|', $types);
             }
         }
 
@@ -210,13 +223,16 @@ class FileProcessor
                 $type = (string)$type;
             }
 
-            if (isset($uses[$type])) {
-                $type = $uses[$type];
+            $types = [];
+            foreach (explode('|', $type) as $tmpType) {
+                if (isset($uses[$tmpType])) {
+                    $tmpType = $uses[$tmpType];
+                }
+
+                $types[] = substr($tmpType, 0, 1) == '\\' ? substr($tmpType, 1) : $tmpType;
             }
 
-            $type = substr($type, 0, 1) == '\\' ? substr($type, 1) : $type;
-
-            $rtn['return'] = $type;
+            $rtn['return'] = implode('|', $types);
         }
 
         return $rtn;
